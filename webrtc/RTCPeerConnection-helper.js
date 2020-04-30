@@ -594,7 +594,8 @@ const trackFactories = {
       ctx.fillStyle = `rgb(${count%255}, ${count*count%255}, ${count%255})`;
       count += 1;
       ctx.fillRect(0, 0, width, height);
-      // If signal is set, add a constant-color box to the video frame.
+      // If signal is set, add a constant-color box to the video frame
+      // at coordinates 10 to 30 in both X and Y direction.
       if (signal !== null) {
         ctx.fillStyle = `rgb(${signal}, ${signal}, ${signal})`;
         ctx.fillRect(10, 10, 20, 20);
@@ -623,16 +624,20 @@ function getVideoSignal(v) {
   context.drawImage(v, 0, 0, v.videoWidth, v.videoHeight);
   // Extract pixel value at position 20, 20
   let pixel = context.getImageData(20, 20, 1, 1);
-  return (pixel.data[0] + pixel.data[1] + pixel.data[2]) / 3;
+  // Use luma reconstruction to get back original value according to
+  // ITU-R rec BT.709
+  return (pixel.data[0] * 0.21 + pixel.data[1] * 0.72 + pixel.data[2] * 0.07);
 }
 
 function detectSignal(t, v, value) {
   return new Promise((resolve) => {
+    let count = 0;
     let check = () => {
       const signal = getVideoSignal(v);
       if (signal !== null && signal < value + 1 && signal > value - 1) {
-        resolve();
+        resolve(count);
       } else {
+        count += 1;
         t.step_timeout(check, 100);
       }
     }

@@ -1,0 +1,75 @@
+<!doctype html>
+<meta charset=utf-8>
+<meta name="timeout" content="long">
+<title>RTCPeerConnection Video detector test</title>
+<script src="/resources/testharness.js"></script>
+<script src="/resources/testharnessreport.js"></script>
+<script src="RTCPeerConnection-helper.js"></script>
+<script>
+'use strict';
+
+// This test verifies that the helper function "detectSignal" from
+// RTCPeerConnectionHelper, which is used to detect changes in a video
+// signal, performs properly for a range of "signal" values.
+
+async function SignalSettlementTime(t, v, sender, signal, track1) {
+  const stream2 = await getNoiseStream({video: {signal: signal}});
+  const [track2] = stream2.getTracks();
+  await sender.replaceTrack(track2);
+  const count = await detectSignal(t, v, signal);
+  await sender.replaceTrack(track1);
+  await detectSignal(t, v, 100);
+  stream2.getTracks().forEach(track => track.stop());
+  return count;
+}
+
+promise_test(async t => {
+  const v = document.createElement('video');
+  v.autoplay = true;
+  const pc1 = new RTCPeerConnection();
+  t.add_cleanup(() => pc1.close());
+  const pc2 = new RTCPeerConnection();
+  t.add_cleanup(() => pc2.close());
+  const stream1 = await getNoiseStream({video: {signal: 100}});
+  t.add_cleanup(() => stream1.getTracks().forEach(track => track.stop()));
+  const [track1] = stream1.getTracks();
+  const sender = pc1.addTrack(track1);
+  pc2.ontrack = (e) => {
+    v.srcObject = new MediaStream([e.track]);
+  };
+  const metadataToBeLoaded = new Promise((resolve) => {
+    v.addEventListener('loadedmetadata', () => {
+      resolve();
+    });
+  });
+  exchangeIceCandidates(pc1, pc2);
+  doSignalingHandshake(pc1, pc2);
+  await metadataToBeLoaded;
+  // The basic signal is a track with signal 100. We replace this
+  // with tracks with signal from 0 to 255 and see if they are all
+  // reliably detected.
+  await detectSignal(t, v, 100);
+  // A few buffered frames are received with the old content, and a few
+  // frames may not have settled on exactly the right value. In testing,
+  // this test passes with maxFrames = 3; give a little more margin.
+  const maxFrames = 7;
+  // Test values 0 and 255
+  let maxCount = await SignalSettlementTime(t, v, sender, 0, track1);
+  assert_less_than(maxCount, maxFrames,
+      'Should get the black value within ' + maxFrames + ' frames');
+  maxCount = Math.max(
+      await SignalSettlementTime(t, v, sender, 255, track1), maxCount);
+  assert_less_than(maxCount, maxFrames,
+      'Should get the white value within ' + maxFrames + ' frames');
+  // Test a set of other values - far enough apart to make the test fast.
+  for (let signal = 2; signal <= 255; signal += 47) {
+    if (Math.abs(signal - 100) > 10) {
+      const count = await SignalSettlementTime(t, v, sender, signal, track1);
+      maxCount = Math.max(count, maxCount);
+      assert_less_than(maxCount, 10,
+          'Should get value ' + signal + ' within ' + maxFrames + ' frames');
+    }
+  }
+  assert_less_than(maxCount, 10, 'Should get the right value within 10 frames');
+}, 'Signal detector detects track change within reasonable time');
+</script>
